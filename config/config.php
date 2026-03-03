@@ -1,7 +1,7 @@
 <?php
 return [
     'app_name' => 'Anton Lens',
-    'base_url' => getenv('APP_BASE_URL') ?: 'http://localhost',
+    'base_url' => getenv('APP_BASE_URL') ?: 'https://antonlens.speedxmarketing.com',
     'db' => [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'port' => getenv('DB_PORT') ?: '3306',
