@@ -1,17 +1,17 @@
 <?php
 return [
     'app_name' => 'Anton Lens',
-    'base_url' => getenv('APP_BASE_URL') ?: 'http://localhost',
+    'base_url' => getenv('APP_BASE_URL') ?: 'https://antonlens.speedxmarketing.com/',
     'db' => [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'port' => getenv('DB_PORT') ?: '3306',
-        'name' => getenv('DB_NAME') ?: 'anton_lens',
-        'user' => getenv('DB_USER') ?: 'root',
-        'pass' => getenv('DB_PASS') ?: '',
+        'name' => getenv('DB_NAME') ?: 'u419638158_antonlens',
+        'user' => getenv('DB_USER') ?: 'u419638158_antonlens01',
+        'pass' => getenv('DB_PASS') ?: 'Primaldevs01@@',
         'charset' => 'utf8mb4',
     ],
     'security' => [
-        'app_secret' => getenv('APP_SECRET') ?: 'change-me',
+        'app_secret' => getenv('APP_SECRET') ?: 'sqdbwe79efg234gwerdhfg234edni',
         'login_rate_limit_attempts' => 5,
         'login_rate_limit_window_seconds' => 900,
         'proxy_rate_limit_per_minute' => 60,
