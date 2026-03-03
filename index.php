@@ -18,7 +18,14 @@ use App\Services\View;
 use App\Security\ProxyGuard;
 
 $config = require __DIR__ . '/config/config.php';
-$pdo = Database::pdo($config['db']);
+try {
+    $pdo = Database::pdo($config['db']);
+} catch (Throwable $e) {
+    http_response_code(503);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo "Anton Lens cannot connect to the database. Check DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASS in config/config.php or environment variables.\n";
+    exit;
+}
 
 function e(string $value): string { return htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); }
 function jsonResponse(array $data, int $status = 200): void {
