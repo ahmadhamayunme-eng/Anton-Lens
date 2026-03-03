@@ -5,9 +5,9 @@ return [
     'db' => [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'port' => getenv('DB_PORT') ?: '3306',
-        'name' => getenv('DB_NAME') ?: 'anton_lens',
-        'user' => getenv('DB_USER') ?: 'root',
-        'pass' => getenv('DB_PASS') ?: '',
+        'name' => getenv('DB_NAME') ?: 'u419638158_antonlens',
+        'user' => getenv('DB_USER') ?: 'u419638158_antonlens01',
+        'pass' => getenv('DB_PASS') ?: 'Primaldevs01@@',
         'charset' => 'utf8mb4',
     ],
     'security' => [
