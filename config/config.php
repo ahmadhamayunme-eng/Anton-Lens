@@ -11,7 +11,7 @@ return [
         'charset' => 'utf8mb4',
     ],
     'security' => [
-        'app_secret' => getenv('APP_SECRET') ?: 'change-me',
+        'app_secret' => getenv('APP_SECRET') ?: 'sqdbwe79efg234gwerdhfg234edni',
         'login_rate_limit_attempts' => 5,
         'login_rate_limit_window_seconds' => 900,
         'proxy_rate_limit_per_minute' => 60,
