@@ -90,6 +90,26 @@ if ($method === 'GET' && $path === '/projects/new') {
     $clients = $pdo->query('SELECT * FROM clients ORDER BY name')->fetchAll();
     View::render('projects/new', ['csrf'=>Csrf::token(),'clients'=>$clients]); exit;
 }
+if ($method === 'GET' && $path === '/clients/new') {
+    Auth::requireAuth($pdo);
+    View::render('projects/new-client', ['csrf'=>Csrf::token()]); exit;
+}
+if ($method === 'POST' && $path === '/clients') {
+    Auth::requireAuth($pdo);
+    if (!Csrf::verify($_POST['_csrf'] ?? null)) die('CSRF');
+    $name = trim($_POST['name'] ?? '');
+    if ($name === '') {
+        View::render('projects/new-client', ['csrf'=>Csrf::token(), 'error' => 'Client name is required.']);
+        exit;
+    }
+    $stmt = $pdo->prepare('INSERT INTO clients (name, contact_email, created_at, updated_at) VALUES (:name, :email, NOW(), NOW())');
+    $stmt->execute([
+        'name' => $name,
+        'email' => !empty($_POST['contact_email']) ? strtolower(trim($_POST['contact_email'])) : null,
+    ]);
+    header('Location: /projects/new');
+    exit;
+}
 if ($method === 'POST' && $path === '/projects') {
     $user = Auth::requireAuth($pdo);
     if (!Csrf::verify($_POST['_csrf'] ?? null)) die('CSRF');
