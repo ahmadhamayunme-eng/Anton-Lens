@@ -55,6 +55,87 @@ function logActivity(PDO $pdo, ?int $projectId, ?int $userId, ?int $guestId, str
     $stmt->execute(['p'=>$projectId,'u'=>$userId,'g'=>$guestId,'t'=>$event,'j'=>json_encode($payload)]);
 }
 
+function resolveUrl(string $baseUrl, string $relativeUrl): string {
+    if ($relativeUrl === '') return $baseUrl;
+    if (preg_match('#^https?://#i', $relativeUrl)) return $relativeUrl;
+    if (str_starts_with($relativeUrl, '//')) {
+        $parts = parse_url($baseUrl);
+        $scheme = $parts['scheme'] ?? 'https';
+        return $scheme . ':' . $relativeUrl;
+    }
+
+    $parts = parse_url($baseUrl);
+    if (!$parts || empty($parts['scheme']) || empty($parts['host'])) return $relativeUrl;
+
+    $origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+    if (str_starts_with($relativeUrl, '/')) return $origin . $relativeUrl;
+
+    $path = $parts['path'] ?? '/';
+    $dir = rtrim(str_replace('\\', '/', dirname($path)), '/');
+    if ($dir === '') $dir = '/';
+    return $origin . ($dir === '/' ? '/' : $dir . '/') . $relativeUrl;
+}
+
+function proxyFetchWithRedirects(string $startUrl, array $allowedHosts): array {
+    $currentUrl = $startUrl;
+    $maxRedirects = 5;
+
+    for ($i = 0; $i <= $maxRedirects; $i++) {
+        if (!ProxyGuard::validateUrl($currentUrl, $allowedHosts)) {
+            throw new RuntimeException('Blocked URL');
+        }
+
+        $ch = curl_init($currentUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HEADER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_MAXREDIRS => 0,
+            CURLOPT_USERAGENT => 'Anton Lens Proxy',
+            CURLOPT_ENCODING => '',
+            CURLOPT_HTTPHEADER => ['Cookie:', 'Accept-Language: en-US,en;q=0.9'],
+        ]);
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            throw new RuntimeException('Fetch failed');
+        }
+
+        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $contentType = (string) (curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'text/html; charset=UTF-8');
+        curl_close($ch);
+
+        $rawHeaders = substr($response, 0, $headerSize);
+        $body = substr($response, $headerSize);
+
+        if (strlen($body) > 5 * 1024 * 1024) {
+            throw new RuntimeException('Too large');
+        }
+
+        if ($statusCode >= 300 && $statusCode < 400) {
+            preg_match('/^Location:\s*(.+)$/im', $rawHeaders, $matches);
+            $location = isset($matches[1]) ? trim($matches[1]) : '';
+            if ($location === '') {
+                throw new RuntimeException('Redirect without location');
+            }
+            $currentUrl = resolveUrl($currentUrl, $location);
+            continue;
+        }
+
+        return [
+            'url' => $currentUrl,
+            'status' => $statusCode,
+            'content_type' => $contentType,
+            'body' => $body,
+        ];
+    }
+
+    throw new RuntimeException('Too many redirects');
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $user = Auth::user($pdo);
@@ -262,25 +343,61 @@ if (str_starts_with($path, '/api/')) {
 }
 
 if ($method==='GET' && preg_match('#^/proxy/(\d+)$#',$path,$m)) {
-    $projectId=(int)$m[1]; $url=$_GET['url'] ?? '';
-    if (!$user && empty($_SESSION['guest_id_'.$projectId])) { http_response_code(403); exit('Unauthorized'); }
-    $p=$pdo->prepare('SELECT * FROM projects WHERE id=:i');$p->execute(['i'=>$projectId]);$project=$p->fetch();
-    $allowed=json_decode($project['allowed_hosts_json'], true) ?: [];
-    if (!ProxyGuard::validateUrl($url,$allowed)) { http_response_code(403); exit('Blocked URL'); }
-    $ch=curl_init($url);
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>10,CURLOPT_USERAGENT=>'Anton Lens Proxy',CURLOPT_HTTPHEADER=>['Cookie:']]);
-    $body=curl_exec($ch); $code=curl_getinfo($ch,CURLINFO_HTTP_CODE); $ctype=curl_getinfo($ch,CURLINFO_CONTENT_TYPE) ?: 'text/html';
-    if ($body===false) { http_response_code(502); exit('Fetch failed'); }
-    if (strlen($body) > 5*1024*1024) { http_response_code(413); exit('Too large'); }
-    if ($code>=300 && $code<400) {
-        $loc=curl_getinfo($ch,CURLINFO_REDIRECT_URL) ?: ''; if(!ProxyGuard::validateUrl($loc,$allowed)){ http_response_code(403); exit('Blocked redirect'); }
+    $projectId = (int) $m[1];
+    $url = trim($_GET['url'] ?? '');
+
+    if (!$user && empty($_SESSION['guest_id_' . $projectId])) {
+        http_response_code(403);
+        exit('Unauthorized');
     }
-    if (str_contains($ctype,'text/html')) {
-        $bridge = '<script>(function(){const post=(t,p)=>parent.postMessage(Object.assign({type:t},p||{}),"*");post("MARKUP_IFRAME_READY",{projectId:'.$projectId.',pageUrl:location.href});let ts=0;addEventListener("scroll",()=>{const n=Date.now();if(n-ts>100){ts=n;post("MARKUP_SCROLL",{scrollY:window.scrollY,scrollX:window.scrollX});}});const emit=()=>post("MARKUP_URL_CHANGED",{pageUrl:location.href});const op=history.pushState;history.pushState=function(){op.apply(history,arguments);emit();};const or=history.replaceState;history.replaceState=function(){or.apply(history,arguments);emit();};addEventListener("popstate",emit);addEventListener("message",(e)=>{if(e.data&&e.data.type==="MARKUP_SCROLL_TO"){window.scrollTo(0,e.data.scrollY||0);}});})();</script>';
-        if (stripos($body, '</head>') !== false) $body = preg_replace('/<\/head>/i', '<base href="'.e($url).'">'.$bridge.'</head>', $body, 1);
-        else $body = $bridge . $body;
+
+    $p = $pdo->prepare('SELECT * FROM projects WHERE id=:i LIMIT 1');
+    $p->execute(['i' => $projectId]);
+    $project = $p->fetch();
+    if (!$project) {
+        http_response_code(404);
+        exit('Project not found');
     }
-    header('Content-Type: '.$ctype); echo $body; exit;
+
+    $allowed = json_decode($project['allowed_hosts_json'], true) ?: [];
+    if (!is_array($allowed) || empty($allowed)) {
+        http_response_code(403);
+        exit('Project host allowlist is empty');
+    }
+
+    try {
+        $result = proxyFetchWithRedirects($url, $allowed);
+    } catch (Throwable $e) {
+        $message = $e->getMessage();
+        if ($message === 'Blocked URL') {
+            http_response_code(403);
+            exit('Blocked URL');
+        }
+        if ($message === 'Too large') {
+            http_response_code(413);
+            exit('Response too large');
+        }
+        http_response_code(502);
+        exit('Proxy request failed');
+    }
+
+    $finalUrl = $result['url'];
+    $ctype = $result['content_type'];
+    $body = $result['body'];
+
+    if (str_contains(strtolower($ctype), 'text/html')) {
+        $bridge = '<script>(function(){const post=(t,p)=>parent.postMessage(Object.assign({type:t},p||{}),"*");post("MARKUP_IFRAME_READY",{projectId:' . $projectId . ',pageUrl:location.href});let ts=0;addEventListener("scroll",()=>{const n=Date.now();if(n-ts>100){ts=n;post("MARKUP_SCROLL",{scrollY:window.scrollY,scrollX:window.scrollX});}});const emit=()=>post("MARKUP_URL_CHANGED",{pageUrl:location.href});const op=history.pushState;history.pushState=function(){op.apply(history,arguments);emit();};const or=history.replaceState;history.replaceState=function(){or.apply(history,arguments);emit();};addEventListener("popstate",emit);addEventListener("message",(e)=>{if(e.data&&e.data.type==="MARKUP_SCROLL_TO"){window.scrollTo(0,e.data.scrollY||0);}});})();</script>';
+        $baseTag = '<base href="' . e($finalUrl) . '">';
+        if (stripos($body, '</head>') !== false) {
+            $body = preg_replace('/<\/head>/i', $baseTag . $bridge . '</head>', $body, 1);
+        } else {
+            $body = $baseTag . $bridge . $body;
+        }
+    }
+
+    header('Content-Type: ' . $ctype);
+    echo $body;
+    exit;
 }
 
 if ($method==='GET' && preg_match('#^/screenshot/(\d+)$#',$path,$m)) {
